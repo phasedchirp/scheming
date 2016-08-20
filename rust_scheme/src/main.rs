@@ -1,18 +1,8 @@
 extern crate nom;
 
 use std::env;
-
-// feels excessively haskell-y maybe?
-#[derive(Clone, Debug, PartialEq)]
-enum LispVal {
-    Atom(String),
-    List(Vec<LispVal>),
-    DottedList(Vec<LispVal>,Box<LispVal>),
-    Number(u64),
-    LString(String),
-    LBool(bool),
-    LChar(char)
-}
+mod scheme;
+use scheme::*;
 
 fn main() {
     let arg_vec: Vec<String> = env::args().collect();
