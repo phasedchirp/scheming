@@ -1,0 +1,6 @@
+[package]
+name = "rust_scheme"
+version = "0.1.0"
+authors = ["phasedchirp <sean.martin@nyu.edu>"]
+
+[dependencies]
