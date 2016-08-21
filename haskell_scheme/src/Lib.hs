@@ -137,16 +137,11 @@ parseNumeric = try parseComplex
            <|> try parseDecimal
            <|> try parseBase
 
-
-parseExpr :: Parser LispVal
-parseExpr = parseAtom
-        <|> parseString
-        <|> try parseChar
-        <|> parseBool
-        <|> parseNumber
-
-parseExpr' :: Parser LispVal
-parseExpr' = spaces >> parseExpr
+parseQuoted :: Parser LispVal
+parseQuoted = do
+  char '\''
+  x <- parseExpr
+  return $ List [Atom "quote", x]
 
 parseList :: Parser LispVal
 parseList  = liftM List $ sepBy parseExpr spaces
@@ -156,6 +151,25 @@ parseDottedList = do
   head' <- endBy parseExpr spaces
   tail' <- char '.' >> spaces >> parseExpr
   return $ DottedList head' tail'
+
+tryLists :: Parser LispVal
+tryLists = do
+  char '('
+  x <- try parseList <|> parseDottedList
+  char ')'
+  return x
+
+parseExpr :: Parser LispVal
+parseExpr = parseAtom
+        <|> parseString
+        <|> try parseChar
+        <|> parseBool
+        <|> parseNumeric
+        <|> parseQuoted
+        <|> tryLists
+
+parseExpr' :: Parser LispVal
+parseExpr' = spaces >> parseExpr
 
 -- Read input:
 readExpr :: String -> String
