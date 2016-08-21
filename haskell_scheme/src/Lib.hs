@@ -3,6 +3,7 @@ module Lib where
 import Control.Monad (liftM)
 import Data.Complex (Complex(..))
 import Data.Ratio
+import qualified Data.Vector as V
 import Numeric (readHex,readOct,readInt)
 import Data.Char (digitToInt)
 import Text.Megaparsec hiding (spaces,space,lexeme)
@@ -19,6 +20,7 @@ import Text.Megaparsec.Combinator (sepBy,endBy)
 data LispVal = Atom String
              | List [LispVal]
              | DottedList [LispVal] LispVal
+             | Vector (V.Vector LispVal)
              | Number Integer
              | Float Double
              | Ratio Rational
@@ -143,6 +145,20 @@ parseQuoted = do
   x <- parseExpr
   return $ List [Atom "quote", x]
 
+parseQuasiquote :: Parser LispVal
+parseQuasiquote = do
+  char '`'
+  x <- parseExpr
+  return $ List [Atom "quasiquote", x]
+
+parseUnquote :: Parser LispVal
+parseUnquote = do
+  char ','
+  x <- parseExpr
+  return $ List [Atom "unquote", x]
+
+
+
 parseList :: Parser LispVal
 parseList  = liftM List $ sepBy parseExpr spaces
 
@@ -159,6 +175,13 @@ tryLists = do
   char ')'
   return x
 
+parseVector :: Parser LispVal
+parseVector = do
+  char '#' >> char '('
+  xs <- sepBy parseExpr spaces
+  char ')'
+  return $ (Vector . V.fromList) xs
+
 parseExpr :: Parser LispVal
 parseExpr = parseAtom
         <|> parseString
@@ -166,6 +189,8 @@ parseExpr = parseAtom
         <|> parseBool
         <|> parseNumeric
         <|> parseQuoted
+        <|> parseQuasiquote
+        <|> parseUnquote
         <|> tryLists
 
 parseExpr' :: Parser LispVal
