@@ -6,3 +6,4 @@ authors = ["phasedchirp <sean.martin@nyu.edu>"]
 [dependencies]
 
 nom = "^1.2.4"
+num = "0.1"
