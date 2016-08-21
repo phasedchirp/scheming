@@ -4,4 +4,4 @@ Working through ["Write Yourself a Scheme in 48 Hours"](https://en.wikibooks.org
 
 Current state of each version:
 * **Haskell**: Some input parsing
-* **Rust**: Currently almost nothing
+* **Rust**: Basic data type for Lisp values (incomplete)

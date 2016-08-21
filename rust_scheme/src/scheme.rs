@@ -1,4 +1,6 @@
-extern crate nom;
+// extern crate nom;
+
+use nom::*;
 
 // Data types:
 #[derive(Clone, Debug, PartialEq)]
@@ -11,3 +13,5 @@ pub enum LispVal {
     LBool(bool),
     LChar(char)
 }
+
+named!(parse_bool,alt!(tag!("#t") | tag!("#f")));

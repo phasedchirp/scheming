@@ -1,3 +1,4 @@
+#[macro_use]
 extern crate nom;
 
 use std::env;
@@ -6,7 +7,7 @@ use scheme::*;
 
 fn main() {
     let arg_vec: Vec<String> = env::args().collect();
-    let test = LispVal::List(vec![LispVal::Number(64),LispVal::Number(24)]);
-    println!("Hello, {:?}!",test);
-    println!("{}", arg_vec[1]);
+    // let test = parse_bool("#tstuff");
+    // println!("{:?}",test);
+    println!("Hello, {}!", arg_vec[1]);
 }
