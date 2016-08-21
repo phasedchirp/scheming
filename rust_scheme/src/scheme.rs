@@ -19,13 +19,13 @@ pub enum LispVal {
 }
 
 // Parsers:
-// named!(parse_symbol,one_of!("!$%&|*+-/:<=>?@^_~"));
+// named!(parse_symbol,one_of!(b"!$%&|*+-/:<=>?@^_~"));
 // named!(parse_bool,alt!(tag!("#t") | tag!("#f")));
 // named!(parse_atom,unimplemented!());
 // named!(parse_list,unimplemented!());
 // named!(parse_vector,unimplemented!());
 // named!(parse_dottedlist,unimplemented!());
-// named!(parse_string,unimplemented!());
+named!(parse_string,delimited!(char!('\"'), is_not!("\""), char!('\"')));
 // named!(parse_quoted,unimplemented!());
 // named!(parse_quasiquote,unimplemented!());
 // named!(parse_unquote,unimplemented!());
