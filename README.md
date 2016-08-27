@@ -4,5 +4,5 @@ Working through ["Write Yourself a Scheme in 48 Hours"](https://en.wikibooks.org
 The Haskell version uses Megaparsec for parsing while the Rust version is using Nom.
 
 Current state of each version:
-* **Haskell**: Some input parsing
-* **Rust**: Basic data type for Lisp values (incomplete)
+* **Haskell**: Input parsing, some evaluation, and some error handling.
+* **Rust**: Some input parsing.

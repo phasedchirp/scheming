@@ -3,15 +3,21 @@ extern crate nom;
 extern crate num;
 
 use std::env;
+// use std::str::from_utf8;
+use std::string::String;
 mod scheme;
 use scheme::*;
 use nom::*;
 
-named!(test_parser,tag!("#\\"));
+
 
 fn main() {
     let arg_vec: Vec<String> = env::args().collect();
-    let test = test_parser(b"#\\axyz");
-    println!("{:?}",test);
-    println!("Hello, {}!", arg_vec[1]);
+    let test_thing: Vec<&[u8]> = arg_vec.iter().map(|x| {x.as_bytes()}).collect();
+    let parsed = parse_bool(test_thing[1]);
+    let string_parse = parse_string(test_thing[2]);
+    let char_parse = parse_char(test_thing[3]);
+    println!("{:?}",parsed);
+    println!("{:?}",string_parse);
+    println!("{:?}",char_parse);
 }
