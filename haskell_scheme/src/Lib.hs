@@ -49,7 +49,8 @@ primitives = [("+", numericBinop (+)),
               ("eq?", eqv),
               ("eqv?", eqv),
               ("equal?", equal),
-              ("cond", cond)]
+              ("cond", cond),
+              ("case",lispCase)]
 
 
 
@@ -187,6 +188,12 @@ cond (test:ts) = do
                                        List [t,e@(List exprs)] -> (eval t, eval e)
                                       --  otherwise               -> (throwE (Default "unrecognized conditional form")
 
+lispCase :: [LispVal] -> ThrowsError LispVal
+lispCase [] = throwE (Default "no key provided")
+lispCase [key] = throwE (Default "no applicable cases")
+lispCase (key:(List [List datums, expr]):rest) = do
+  val <- eval key
+  if val `elem` datums then eval expr else lispCase (key:rest)
 
 apply :: String -> [LispVal] -> ThrowsError LispVal
 apply func args = maybe (throwE $ NotFunction "Unrecognized primitive function args" func)
