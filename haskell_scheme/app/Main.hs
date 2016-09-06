@@ -3,6 +3,7 @@ module Main where
 import System.Environment
 import Control.Monad (liftM)
 import Lib
+import ParseExpr
 
 parseArg :: IO (ThrowsError LispVal)
 parseArg = do

@@ -4,6 +4,6 @@ version = "0.1.0"
 authors = ["phasedchirp <sean.martin@nyu.edu>"]
 
 [dependencies]
-
-nom = "^1.2.4"
+combine = "1.0.0"
+# nom = "^1.2.4"
 num = "0.1"
