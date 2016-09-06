@@ -1,4 +1,14 @@
-module Lib where
+{-# LANGUAGE ExistentialQuantification #-}
+
+module Lib
+    ( eval
+    , LispVal(..)
+    , showVal
+    , readExpr
+    , trapError
+    , extractValue
+    , ThrowsError
+    ) where
 
 import ParseExpr
 import Control.Monad (liftM)
@@ -6,13 +16,39 @@ import Control.Monad.Trans.Except
 import Text.Megaparsec (ParseError,parse)
 
 
--- data LispNumber = Float Double
---                 | Rational Rational
---                 | Integer Integer
---                 deriving (Eq,Show)
---
--- data LComplex =
-
+primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
+primitives = [("+", numericBinop (+)),
+              ("-", numericBinop (-)),
+              ("*", numericBinop (*)),
+              ("/", numericBinop div),
+              ("mod", numericBinop mod),
+              ("quotient", numericBinop quot),
+              ("remainder", numericBinop rem),
+              ("boolean?", unaryOp isBool),
+              ("symbol?", unaryOp isSymbol),
+              ("string?", unaryOp isString),
+              ("number?", unaryOp isNumber),
+              ("symbol->string", unaryOp stringify),
+              ("string->symbol", unaryOp atomify),
+              ("=", numBoolBinop (==)),
+              ("<", numBoolBinop (<)),
+              (">", numBoolBinop (>)),
+              ("/=", numBoolBinop (/=)),
+              (">=", numBoolBinop (>=)),
+              ("<=", numBoolBinop (<=)),
+              ("&&", boolBoolBinop (&&)),
+              ("||", boolBoolBinop (||)),
+              ("string=?", strBoolBinop (==)),
+              ("string<?", strBoolBinop (<)),
+              ("string>?", strBoolBinop (>)),
+              ("string<=?", strBoolBinop (<=)),
+              ("string>=?", strBoolBinop (>=)),
+              ("car", car),
+              ("cdr", cdr),
+              ("cons", cons),
+              ("eq?", eqv),
+              ("eqv?", eqv),
+              ("equal?", equal)]
 
 
 
@@ -25,6 +61,10 @@ data LispError = NumArgs Integer [LispVal]
               | Default String
 
 
+-- Needed for implementation of `equal?` below
+data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
+
+type ThrowsError = Except LispError
 
 readExpr :: String -> ThrowsError LispVal
 readExpr input = case parse parseExpr "lisp" input of
@@ -63,12 +103,62 @@ eval val@(Float _) = return val
 eval val@(Ratio _) = return val
 eval val@(Bool _) = return val
 eval (List [Atom "quote", val]) = return val
+-- Conditionals
+eval (List [Atom "if", pred, conseq, alt]) =
+     do result <- eval pred
+        case result of Bool False -> eval alt
+                       otherwise  -> eval conseq
 eval (List (Atom func : args)) = mapM eval args >>= apply func
 eval badForm = throwE $ BadSpecialForm "Unrecognized special form" badForm
 
+-- List handling stuff:
+car :: [LispVal] -> ThrowsError LispVal
+car [List (x : _)]          = return x
+car [DottedList (x : _) _]  = return x
+car [badArg]                = throwE $ TypeMismatch "pair" badArg
+car badArgList              = throwE $ NumArgs 1 badArgList
 
--- apply :: String -> [LispVal] -> LispVal
--- apply func args = maybe (Bool False) ($ args) $ lookup func primitives
+cdr :: [LispVal] -> ThrowsError LispVal
+cdr [List (_ : xs)]         = return $ List xs
+cdr [DottedList [_] y]      = return $ y
+cdr [DottedList (_ : xs) y] = return $ DottedList xs y
+cdr [badArg]                = throwE $ TypeMismatch "pair" badArg
+cdr badArgList              = throwE $ NumArgs 1 badArgList
+
+cons :: [LispVal] -> ThrowsError LispVal
+cons [x, List []]           = return $ List [x]
+cons [x, List xs]           = return $ List (x:xs)
+cons [x, DottedList xs y]   = return $ DottedList (x:xs) y
+cons [x, y]                 = return $ DottedList [x] y
+cons badArgList             = throwE $ NumArgs 2 badArgList
+
+-- Regular equivalence checking
+eqv :: [LispVal] -> ThrowsError LispVal
+eqv args = case args of [arg1, arg2] -> return $ Bool $ (arg1 == arg2)
+                        badArgList   -> throwE $ NumArgs 2 badArgList
+
+                        -- [(Number arg1), (Number arg2)]         = return $ Bool $ (arg1 == arg2)
+                        -- [(String arg1), (String arg2)]         = return $ Bool $ (arg1 == arg2)
+                        -- [(Atom arg1), (Atom arg2)]             = return $ Bool $ (arg1 == arg2)
+                        -- [DottedList xs x, DottedList ys y]     = return $ Bool $ (x == y) && (xs == ys)
+                        -- [List xs, List ys]                     = return $ Bool $ xs == ys
+-- Equivalence checking with type coercion
+unpackEquals :: LispVal -> LispVal -> Unpacker -> ThrowsError Bool
+unpackEquals arg1 arg2 (AnyUnpacker unpacker) =
+             do unpacked1 <- unpacker arg1
+                unpacked2 <- unpacker arg2
+                return $ unpacked1 == unpacked2
+        `catchE` (const $ return False)
+
+equal :: [LispVal] -> ThrowsError LispVal
+equal [arg1, arg2] = do
+      primitiveEquals <- liftM or $ mapM (unpackEquals arg1 arg2)
+                         [AnyUnpacker unpackNum, AnyUnpacker unpackStr, AnyUnpacker unpackBool]
+      eqvEquals <- eqv [arg1, arg2]
+      return $ Bool $ (primitiveEquals || let (Bool x) = eqvEquals in x)
+equal badArgList = throwE $ NumArgs 2 badArgList
+
+
 
 apply :: String -> [LispVal] -> ThrowsError LispVal
 apply func args = maybe (throwE $ NotFunction "Unrecognized primitive function args" func)
@@ -76,20 +166,7 @@ apply func args = maybe (throwE $ NotFunction "Unrecognized primitive function a
                         (lookup func primitives)
 
 
-primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
-primitives = [("+", numericBinop (+)),
-              ("-", numericBinop (-)),
-              ("*", numericBinop (*)),
-              ("/", numericBinop div),
-              ("mod", numericBinop mod),
-              ("quotient", numericBinop quot),
-              ("remainder", numericBinop rem),
-              ("boolean?", unaryOp isBool),
-              ("symbol?", unaryOp isSymbol),
-              ("string?", unaryOp isString),
-              ("number?", unaryOp isNumber),
-              ("symbol->string", unaryOp stringify),
-              ("string->symbol", unaryOp atomify)]
+
 
 unaryOp :: (LispVal -> LispVal) -> [LispVal] -> ThrowsError LispVal
 unaryOp f [v] = return $ f v
@@ -120,8 +197,30 @@ unpackFloat (Float n) = n
 unpackFloat _ = 0.0
 
 
--- truthy :: (LispVal -> Bool) -> [LispVal] -> ThrowsError LispVal
--- truthy f = Bool . (all f)
+
+boolBinop :: (LispVal -> ThrowsError a) -> (a -> a -> Bool) -> [LispVal] -> ThrowsError LispVal
+boolBinop unpacker op args = if length args /= 2
+                             then throwE $ NumArgs 2 args
+                             else do left <- unpacker $ args !! 0
+                                     right <- unpacker $ args !! 1
+                                     return $ Bool $ left `op` right
+
+
+numBoolBinop  = boolBinop unpackNum
+strBoolBinop  = boolBinop unpackStr
+boolBoolBinop = boolBinop unpackBool
+
+unpackStr :: LispVal -> ThrowsError String
+unpackStr (String s) = return s
+unpackStr (Number s) = return $ show s
+unpackStr (Bool s)   = return $ show s
+unpackStr notString  = throwE $ TypeMismatch "string" notString
+
+unpackBool :: LispVal -> ThrowsError Bool
+unpackBool (Bool b) = return b
+unpackBool notBool  = throwE $ TypeMismatch "boolean" notBool
+
+
 
 isBool :: LispVal -> LispVal
 isBool (Bool _) = Bool True
@@ -156,7 +255,6 @@ showError (NumArgs expected found)      = "Expected " ++ show expected ++ " args
 showError (TypeMismatch expected found) = "Invalid type: expected " ++ expected ++ ", found " ++ showVal found
 showError (Parser parseErr)             = "Parse error at " ++ show parseErr
 
-type ThrowsError = Except LispError
 
 trapError action = catchE action (return . showError)
 

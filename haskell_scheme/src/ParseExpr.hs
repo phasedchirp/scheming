@@ -26,7 +26,7 @@ data LispVal = Atom String
              | Character Char
              | String String
              | Bool Bool
-            --  deriving (Show)
+             deriving (Eq)
 
 --  Parsers:
 
