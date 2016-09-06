@@ -48,7 +48,8 @@ primitives = [("+", numericBinop (+)),
               ("cons", cons),
               ("eq?", eqv),
               ("eqv?", eqv),
-              ("equal?", equal)]
+              ("equal?", equal),
+              ("cond", cond)]
 
 
 
@@ -107,7 +108,8 @@ eval (List [Atom "quote", val]) = return val
 eval (List [Atom "if", pred, conseq, alt]) =
      do result <- eval pred
         case result of Bool False -> eval alt
-                       otherwise  -> eval conseq
+                       Bool True  -> eval conseq
+                       otherwise  -> throwE $ TypeMismatch "non-bool" result
 eval (List (Atom func : args)) = mapM eval args >>= apply func
 eval badForm = throwE $ BadSpecialForm "Unrecognized special form" badForm
 
@@ -137,11 +139,7 @@ eqv :: [LispVal] -> ThrowsError LispVal
 eqv args = case args of [arg1, arg2] -> return $ Bool $ (arg1 == arg2)
                         badArgList   -> throwE $ NumArgs 2 badArgList
 
-                        -- [(Number arg1), (Number arg2)]         = return $ Bool $ (arg1 == arg2)
-                        -- [(String arg1), (String arg2)]         = return $ Bool $ (arg1 == arg2)
-                        -- [(Atom arg1), (Atom arg2)]             = return $ Bool $ (arg1 == arg2)
-                        -- [DottedList xs x, DottedList ys y]     = return $ Bool $ (x == y) && (xs == ys)
-                        -- [List xs, List ys]                     = return $ Bool $ xs == ys
+
 -- Equivalence checking with type coercion
 unpackEquals :: LispVal -> LispVal -> Unpacker -> ThrowsError Bool
 unpackEquals arg1 arg2 (AnyUnpacker unpacker) =
@@ -150,14 +148,44 @@ unpackEquals arg1 arg2 (AnyUnpacker unpacker) =
                 return $ unpacked1 == unpacked2
         `catchE` (const $ return False)
 
+zipLists :: [LispVal] -> [LispVal] -> [[LispVal]]
+zipLists = zipWith (\x y -> [x,y])
+
+listEqual :: [[LispVal]] -> Bool
+listEqual = lispAnd . (map equal)
+
+lispAnd :: [ThrowsError LispVal] -> Bool
+lispAnd [] = True
+lispAnd (x:xs) = case xE of (Bool val) -> val && (lispAnd xs)
+                            otherwise -> False
+  where xE = either (const (Bool False)) id (runExcept x)
+
 equal :: [LispVal] -> ThrowsError LispVal
-equal [arg1, arg2] = do
-      primitiveEquals <- liftM or $ mapM (unpackEquals arg1 arg2)
-                         [AnyUnpacker unpackNum, AnyUnpacker unpackStr, AnyUnpacker unpackBool]
-      eqvEquals <- eqv [arg1, arg2]
-      return $ Bool $ (primitiveEquals || let (Bool x) = eqvEquals in x)
+equal args = case args of [List xs, List ys] -> if (length xs == length ys)
+                                                  then return $ Bool $ listEqual (zipLists xs ys)
+                                                  else return $ Bool False
+                          [DottedList xs x, DottedList ys y] -> do
+                            (Bool listEq) <- equal [List xs, List ys]
+                            (Bool tailEq) <- equal [x,y]
+                            return $ Bool $ tailEq && listEq
+                          [arg1,arg2] -> do
+                            primitiveEquals <- liftM or $ mapM (unpackEquals arg1 arg2)
+                                               [AnyUnpacker unpackNum, AnyUnpacker unpackStr, AnyUnpacker unpackBool]
+                            (Bool eqvEquals) <- eqv [arg1, arg2]
+                            return $ Bool $ (primitiveEquals || eqvEquals)
 equal badArgList = throwE $ NumArgs 2 badArgList
 
+cond :: [LispVal] -> ThrowsError LispVal
+cond [] = throwE (Default "no default case provided")
+cond (test:ts) = do
+    (Bool test') <- evalTest
+    expr' <- expr
+    if test'
+      then return expr'
+      else cond ts
+  where (evalTest,expr) = case test of List [t]                -> (eval t, eval t)
+                                       List [t,e@(List exprs)] -> (eval t, eval e)
+                                      --  otherwise               -> (throwE (Default "unrecognized conditional form")
 
 
 apply :: String -> [LispVal] -> ThrowsError LispVal
