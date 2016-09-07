@@ -14,6 +14,7 @@ import ParseExpr
 import Control.Monad (liftM)
 import Control.Monad.Trans.Except
 import Text.Megaparsec (ParseError,parse)
+import Data.Char (toLower)
 
 
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
@@ -43,6 +44,13 @@ primitives = [("+", numericBinop (+)),
               ("string>?", strBoolBinop (>)),
               ("string<=?", strBoolBinop (<=)),
               ("string>=?", strBoolBinop (>=)),
+              ("string-ci=?", strCiBoolBinop (==)),
+              ("string-ci<?", strCiBoolBinop (<)),
+              ("string-ci>?", strCiBoolBinop (>)),
+              ("string-ci<=?", strCiBoolBinop (<=)),
+              ("string-ci>=?", strCiBoolBinop (>=)),
+              ("make-string", makeString),
+              ("string", string),
               ("car", car),
               ("cdr", cdr),
               ("cons", cons),
@@ -78,6 +86,7 @@ readExpr input = case parse parseExpr "lisp" input of
 -- Printing
 showVal :: LispVal -> String
 showVal (String contents) = "\"" ++ contents ++ "\""
+showVal (Character contents) = "#\\" ++ [contents]
 showVal (Atom name) = name
 showVal (Number contents) = show contents
 showVal (Float contents) = show contents
@@ -104,6 +113,7 @@ eval val@(Complex _) = return val
 eval val@(Float _) = return val
 eval val@(Ratio _) = return val
 eval val@(Bool _) = return val
+eval val@(Character _) = return val
 eval (List [Atom "quote", val]) = return val
 -- Conditionals
 eval (List [Atom "if", pred, conseq, alt]) =
@@ -247,6 +257,7 @@ boolBinop unpacker op args = if length args /= 2
 
 numBoolBinop  = boolBinop unpackNum
 strBoolBinop  = boolBinop unpackStr
+strCiBoolBinop = boolBinop unpackCiStr
 boolBoolBinop = boolBinop unpackBool
 
 unpackStr :: LispVal -> ThrowsError String
@@ -254,6 +265,35 @@ unpackStr (String s) = return s
 unpackStr (Number s) = return $ show s
 unpackStr (Bool s)   = return $ show s
 unpackStr notString  = throwE $ TypeMismatch "string" notString
+
+unpackCiStr :: LispVal -> ThrowsError String
+unpackCiStr (String s) = return $ map toLower s
+unpackCiStr s = unpackStr s
+
+makeString :: [LispVal] -> ThrowsError LispVal
+makeString [] = throwE $ NumArgs 1 []
+makeString [x] = do
+  val <- eval x
+  case val of Number n -> return $ String $ replicate (fromIntegral n) ' '
+              otherwise -> throwE $ Default "make-string! takes an integer"
+makeString [x,y] = do
+  val <- eval x
+  c <- eval y
+  case (val,c) of (Number n, Character x) -> return $ String $ replicate (fromIntegral n) x
+                  otherwise -> throwE $ Default "make-string! takes an integer and character"
+
+
+appendChars :: LispVal -> LispVal -> LispVal
+appendChars (Character c1) (Character c2) = String $ c1:c2:[]
+appendChars (Character c1) (String s) = String $ c1:s
+-- appendChars _ _ = throwE $ Default "tried to append non-characters"
+
+string :: [LispVal] -> ThrowsError LispVal
+string [] = return $ String []
+string xs = do
+  c <- sequence $ map eval xs
+  return $ foldr appendChars (String []) c
+  -- sequence
 
 unpackBool :: LispVal -> ThrowsError Bool
 unpackBool (Bool b) = return b
