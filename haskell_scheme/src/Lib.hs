@@ -112,6 +112,7 @@ eval (List [Atom "if", pred, conseq, alt]) =
                        Bool True  -> eval conseq
                        otherwise  -> throwE $ TypeMismatch "non-bool" result
 eval (List (Atom func : args)) = mapM eval args >>= apply func
+eval val@(List _) = return val
 eval badForm = throwE $ BadSpecialForm "Unrecognized special form" badForm
 
 -- List handling stuff:
@@ -191,9 +192,12 @@ cond (test:ts) = do
 lispCase :: [LispVal] -> ThrowsError LispVal
 lispCase [] = throwE (Default "no key provided")
 lispCase [key] = throwE (Default "no applicable cases")
-lispCase (key:(List [List datums, expr]):rest) = do
+lispCase (key:(List [datums, expr]):rest) = do
   val <- eval key
-  if val `elem` datums then eval expr else lispCase (key:rest)
+  -- return val
+  case datums of List vals -> if val `elem` vals then return expr else lispCase (key:rest)
+                 otherwise -> throwE $ Default "something went wrong"
+  -- if val `elem` vals then else return $ String "something else" --
 
 apply :: String -> [LispVal] -> ThrowsError LispVal
 apply func args = maybe (throwE $ NotFunction "Unrecognized primitive function args" func)
