@@ -51,6 +51,8 @@ primitives = [("+", numericBinop (+)),
               ("string-ci>=?", strCiBoolBinop (>=)),
               ("make-string", makeString),
               ("string", string),
+              ("string-length", stringLength),
+              ("string-ref", stringRef),
               ("car", car),
               ("cdr", cdr),
               ("cons", cons),
@@ -293,7 +295,18 @@ string [] = return $ String []
 string xs = do
   c <- sequence $ map eval xs
   return $ foldr appendChars (String []) c
-  -- sequence
+
+stringLength :: [LispVal] -> ThrowsError LispVal
+stringLength [] = throwE $ NumArgs 0 []
+stringLength [String xs] = return $ Number $ fromIntegral (length xs)
+stringLength _ = throwE $ Default "invalid arguments"
+
+stringRef :: [LispVal] -> ThrowsError LispVal
+stringRef [] = throwE $ NumArgs 0 []
+stringRef [n] = throwE $ NumArgs 1 [n]
+stringRef [Number n, String xs] = return $ Character $ xs !! (fromIntegral n)
+stringRef _ = throwE $ Default "invalid arguments"
+
 
 unpackBool :: LispVal -> ThrowsError Bool
 unpackBool (Bool b) = return b
