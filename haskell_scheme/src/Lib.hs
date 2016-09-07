@@ -53,6 +53,12 @@ primitives = [("+", numericBinop (+)),
               ("string", string),
               ("string-length", stringLength),
               ("string-ref", stringRef),
+              ("string-set!", stringSet),
+              ("substring", substring),
+              ("string-append", stringAppend),
+              ("string-copy", stringCopy),
+              ("string->list", stringToList),
+              ("list->string", listToString),
               ("car", car),
               ("cdr", cdr),
               ("cons", cons),
@@ -299,13 +305,55 @@ string xs = do
 stringLength :: [LispVal] -> ThrowsError LispVal
 stringLength [] = throwE $ NumArgs 0 []
 stringLength [String xs] = return $ Number $ fromIntegral (length xs)
-stringLength _ = throwE $ Default "invalid arguments"
+stringLength _ = throwE $ Default "invalid arguments to string-length"
 
 stringRef :: [LispVal] -> ThrowsError LispVal
-stringRef [] = throwE $ NumArgs 0 []
-stringRef [n] = throwE $ NumArgs 1 [n]
 stringRef [Number n, String xs] = return $ Character $ xs !! (fromIntegral n)
-stringRef _ = throwE $ Default "invalid arguments"
+stringRef _ = throwE $ Default "invalid arguments to string-ref"
+
+insertChar :: Integer -> Char -> String -> String
+insertChar _ _ [] = []
+insertChar k c (x:xs) | k < 0 = xs
+                      | k == 0 = c:xs
+                      | otherwise = x:(insertChar (k-1) c xs)
+
+stringSet :: [LispVal] -> ThrowsError LispVal
+stringSet [String xs, Number n, Character c] = return $ String $ insertChar n c xs
+stringSet _ = throwE $ Default "invalid arguments to string-set!"
+
+getSubstring :: Integer -> Integer -> String -> String
+getSubstring _ _ [] = []
+getSubstring f l cs = take (l' - f') $ drop f' cs
+  where [f',l'] = map fromIntegral [f,l]
+
+substring :: [LispVal] -> ThrowsError LispVal
+substring [String cs, Number f, Number l] | (l+1) <= (fromIntegral $ length cs) = return $ String $ getSubstring f l cs
+                                          | otherwise = throwE $ Default "indexing error in substring"
+substring _ = throwE $ Default "invalid arguments to substring"
+
+stringAppend :: [LispVal] -> ThrowsError LispVal
+stringAppend [String xs, String ys] = return $ String $ xs ++ ys
+stringAppend _ = throwE $ Default "invalid arguments to string-append"
+
+stringCopy :: [LispVal] -> ThrowsError LispVal
+stringCopy [String xs] = return $ String xs
+stringCopy _ = throwE $ Default "invalid arguments to string-copy"
+
+stringToList :: [LispVal] -> ThrowsError LispVal
+stringToList [String xs] = return $ List $ map Character xs
+
+listToString :: [LispVal] -> ThrowsError LispVal
+listToString [List xs] =
+  let isChar (Character _) = True
+      isChar _ = False
+  in do
+    c <- sequence $ map eval xs
+    if all isChar c
+      then return $ foldr appendChars (String []) c
+      else throwE $ Default "invalid arguments to list->string"
+
+
+
 
 
 unpackBool :: LispVal -> ThrowsError Bool
@@ -346,6 +394,7 @@ showError (NotFunction message func)    = message ++ ": " ++ show func
 showError (NumArgs expected found)      = "Expected " ++ show expected ++ " args; found values " ++ unwordsList found
 showError (TypeMismatch expected found) = "Invalid type: expected " ++ expected ++ ", found " ++ showVal found
 showError (Parser parseErr)             = "Parse error at " ++ show parseErr
+showError (Default message)             = message
 
 
 trapError action = catchE action (return . showError)
