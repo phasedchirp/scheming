@@ -12,13 +12,14 @@ module Lib
 
 import ParseExpr
 import Control.Monad (liftM)
-import Control.Monad.Trans.Except
+import Control.Monad.Trans.Except (throwE,catchE,Except(..),runExcept)
 import Text.Megaparsec (ParseError,parse)
 import Data.Char (toLower)
+import qualified Data.Map as M (Map(..), lookup, insert, fromList)
 
 
-primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
-primitives = [("+", numericBinop (+)),
+primitives :: M.Map String ([LispVal] -> ThrowsError LispVal)
+primitives = M.fromList [("+", numericBinop (+)),
               ("-", numericBinop (-)),
               ("*", numericBinop (*)),
               ("/", numericBinop div),
@@ -220,7 +221,7 @@ lispCase (key:(List [datums, expr]):rest) = do
 apply :: String -> [LispVal] -> ThrowsError LispVal
 apply func args = maybe (throwE $ NotFunction "Unrecognized primitive function args" func)
                         ($ args)
-                        (lookup func primitives)
+                        (M.lookup func primitives)
 
 
 

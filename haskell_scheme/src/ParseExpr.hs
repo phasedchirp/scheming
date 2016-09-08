@@ -7,11 +7,12 @@ module ParseExpr
 
 import Data.Complex (Complex(..))
 import Data.Ratio
-import qualified Data.Vector as V
+import qualified Data.Vector as V (Vector,fromList,(//),(!))
 import Numeric (readHex,readOct,readInt)
 import Data.Char (digitToInt)
-import Text.Megaparsec hiding (spaces,space,lexeme)
-import Text.Megaparsec.String
+import Text.Megaparsec (oneOf,skipSome,some,letterChar,spaceChar,char,digitChar,choice
+                        ,(<|>),try,noneOf,many,octDigitChar,hexDigitChar,printChar) --hiding (spaces,space,lexeme)
+import Text.Megaparsec.String (Parser(..))
 import Text.Megaparsec.Combinator (sepBy,endBy)
 import Control.Monad (liftM)
 

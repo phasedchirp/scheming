@@ -1,12 +1,12 @@
 module Main where
 
-import System.Environment
+import System.Environment (getArgs)
 import Control.Monad (liftM, forever)
 import Lib
 import ParseExpr
 import System.Exit (exitSuccess)
 import Text.Read (readMaybe)
-import System.IO
+import System.IO (hSetBuffering,stdout,BufferMode(NoBuffering))
 
 -- flushStr :: String -> IO ()
 -- flushStr str = putStr str >> hFlush stdout
