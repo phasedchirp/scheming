@@ -8,16 +8,47 @@ module Lib
     , trapError
     , extractValue
     , ThrowsError
+    , Env
+    , runIOThrows
+    , liftThrows
+    , nullEnv
     ) where
 
 import ParseExpr
 import Control.Monad (liftM)
-import Control.Monad.Trans.Except (throwE,catchE,Except(..),runExcept)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Except (throwE,catchE,Except(..),runExcept,ExceptT(..),runExceptT,except)
 import Text.Megaparsec (ParseError,parse)
 import Data.Char (toLower)
 import qualified Data.Map as M (Map(..), lookup, insert, fromList)
+import Data.IORef
+
+-- Types:
+
+data LispError = NumArgs Integer [LispVal]
+              | TypeMismatch String LispVal
+              | Parser ParseError
+              | BadSpecialForm String LispVal
+              | NotFunction String String
+              | UnboundVar String String
+              | Default String
 
 
+-- Needed for implementation of `equal?` below
+data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
+
+type ThrowsError = Except LispError
+
+-- Type for enviroments to be passed around:
+type Env = IORef [(String, IORef LispVal)]
+
+type IOThrowsError = ExceptT LispError IO
+
+
+
+
+-- Lookup table of primitive functions:
 primitives :: M.Map String ([LispVal] -> ThrowsError LispVal)
 primitives = M.fromList [("+", numericBinop (+)),
               ("-", numericBinop (-)),
@@ -50,8 +81,8 @@ primitives = M.fromList [("+", numericBinop (+)),
               ("string-ci>?", strCiBoolBinop (>)),
               ("string-ci<=?", strCiBoolBinop (<=)),
               ("string-ci>=?", strCiBoolBinop (>=)),
-              ("make-string", makeString),
-              ("string", string),
+              -- ("make-string", makeString),
+              -- ("string", string),
               ("string-length", stringLength),
               ("string-ref", stringRef),
               ("string-set!", stringSet),
@@ -59,31 +90,20 @@ primitives = M.fromList [("+", numericBinop (+)),
               ("string-append", stringAppend),
               ("string-copy", stringCopy),
               ("string->list", stringToList),
-              ("list->string", listToString),
+              -- ("list->string", listToString),
               ("car", car),
               ("cdr", cdr),
               ("cons", cons),
               ("eq?", eqv),
               ("eqv?", eqv),
-              ("equal?", equal),
-              ("cond", cond),
-              ("case",lispCase)]
+              ("equal?", equal)
+              -- ("cond", cond),
+              -- ("case",lispCase)
+              ]
 
 
 
-data LispError = NumArgs Integer [LispVal]
-              | TypeMismatch String LispVal
-              | Parser ParseError
-              | BadSpecialForm String LispVal
-              | NotFunction String String
-              | UnboundVar String String
-              | Default String
 
-
--- Needed for implementation of `equal?` below
-data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
-
-type ThrowsError = Except LispError
 
 readExpr :: String -> ThrowsError LispVal
 readExpr input = case parse parseExpr "lisp" input of
@@ -115,24 +135,31 @@ unwordsList :: [LispVal] -> String
 unwordsList = unwords . map showVal
 
 
-eval :: LispVal -> ThrowsError LispVal
-eval val@(String _) = return val
-eval val@(Number _) = return val
-eval val@(Complex _) = return val
-eval val@(Float _) = return val
-eval val@(Ratio _) = return val
-eval val@(Bool _) = return val
-eval val@(Character _) = return val
-eval (List [Atom "quote", val]) = return val
--- Conditionals
-eval (List [Atom "if", pred, conseq, alt]) =
-     do result <- eval pred
-        case result of Bool False -> eval alt
-                       Bool True  -> eval conseq
-                       otherwise  -> throwE $ TypeMismatch "non-bool" result
-eval (List (Atom func : args)) = mapM eval args >>= apply func
-eval val@(List _) = return val
-eval badForm = throwE $ BadSpecialForm "Unrecognized special form" badForm
+
+
+eval :: Env -> LispVal -> IOThrowsError LispVal
+eval env val@(String _) = return val
+eval env val@(Character _) = return val
+eval env val@(Bool _) = return val
+eval env val@(Number _) = return val
+eval env val@(Complex _) = return val
+eval env val@(Float _) = return val
+eval env val@(Ratio _) = return val
+eval env (Atom id) = getVar env id
+eval env (List [Atom "quote", val]) = return val
+eval env (List [Atom "if", pred, conseq, alt]) = do
+  result <- eval env pred
+  case result of Bool False -> eval env alt
+                 otherwise  -> eval env conseq
+          -- Alternative approach if you want only bools to be conditional-y, drop the otherwise clause and add these two
+                -- Bool True -> eval env conseq
+               -- otherwise -> throwE $ TypeMismatch "non-bool" result
+eval env (List [Atom "set!", Atom var, form]) = eval env form >>= setVar env var
+eval env (List [Atom "define", Atom var, form]) = eval env form >>= defineVar env var
+eval env (List (Atom func : args)) = mapM (eval env) args >>= liftThrows . apply func
+eval env val@(List _) = return val
+eval env badForm = throwE $ BadSpecialForm "Unrecognized special form" badForm
+
 
 -- List handling stuff:
 car :: [LispVal] -> ThrowsError LispVal
@@ -196,26 +223,26 @@ equal args = case args of [List xs, List ys] -> if (length xs == length ys)
                             return $ Bool $ (primitiveEquals || eqvEquals)
 equal badArgList = throwE $ NumArgs 2 badArgList
 
-cond :: [LispVal] -> ThrowsError LispVal
-cond [] = throwE (Default "no default case provided")
-cond (test:ts) = do
-    (Bool test') <- evalTest
-    expr' <- expr
-    if test'
-      then return expr'
-      else cond ts
-  where (evalTest,expr) = case test of List [t]                -> (eval t, eval t)
-                                       List [t,e@(List exprs)] -> (eval t, eval e)
+-- cond :: Env -> [LispVal] -> ThrowsError LispVal
+-- cond _ [] = throwE (Default "no default case provided")
+-- cond env (test:ts) = do
+--     (Bool test') <- evalTest
+--     expr' <- expr
+--     if test'
+--       then return expr'
+--       else cond ts
+--   where (evalTest,expr) = case test of List [t]                -> (eval env t, eval env t)
+--                                        List [t,e@(List exprs)] -> (eval env t, eval env e)
                                       --  otherwise               -> (throwE (Default "unrecognized conditional form")
 
-lispCase :: [LispVal] -> ThrowsError LispVal
-lispCase [] = throwE (Default "no key provided")
-lispCase [key] = throwE (Default "no applicable cases")
-lispCase (key:(List [datums, expr]):rest) = do
-  val <- eval key
-  -- return val
-  case datums of List vals -> if val `elem` vals then return expr else lispCase (key:rest)
-                 otherwise -> throwE $ Default "something went wrong"
+-- lispCase :: Env -> [LispVal] -> ThrowsError LispVal
+-- lispCase _ [] = throwE (Default "no key provided")
+-- lispCase _ [key] = throwE (Default "no applicable cases")
+-- lispCase env (key:(List [datums, expr]):rest) = do
+--   val <- eval env key
+--   -- return val
+--   case datums of List vals -> if val `elem` vals then return expr else lispCase (key:rest)
+--                  otherwise -> throwE $ Default "something went wrong"
   -- if val `elem` vals then else return $ String "something else" --
 
 apply :: String -> [LispVal] -> ThrowsError LispVal
@@ -279,17 +306,17 @@ unpackCiStr :: LispVal -> ThrowsError String
 unpackCiStr (String s) = return $ map toLower s
 unpackCiStr s = unpackStr s
 
-makeString :: [LispVal] -> ThrowsError LispVal
-makeString [] = throwE $ NumArgs 1 []
-makeString [x] = do
-  val <- eval x
-  case val of Number n -> return $ String $ replicate (fromIntegral n) ' '
-              otherwise -> throwE $ Default "make-string! takes an integer"
-makeString [x,y] = do
-  val <- eval x
-  c <- eval y
-  case (val,c) of (Number n, Character x) -> return $ String $ replicate (fromIntegral n) x
-                  otherwise -> throwE $ Default "make-string! takes an integer and character"
+-- makeString :: [LispVal] -> ThrowsError LispVal
+-- makeString [] = throwE $ NumArgs 1 []
+-- makeString [x] = do
+--   val <- eval nullEnv x
+--   case val of Number n -> return $ String $ replicate (fromIntegral n) ' '
+--               otherwise -> throwE $ Default "make-string! takes an integer"
+-- makeString [x,y] = do
+--   val <- eval nullEnv x
+--   c <- eval nullEnv y
+--   case (val,c) of (Number n, Character x) -> return $ String $ replicate (fromIntegral n) x
+--                   otherwise -> throwE $ Default "make-string! takes an integer and character"
 
 
 appendChars :: LispVal -> LispVal -> LispVal
@@ -297,11 +324,11 @@ appendChars (Character c1) (Character c2) = String $ c1:c2:[]
 appendChars (Character c1) (String s) = String $ c1:s
 -- appendChars _ _ = throwE $ Default "tried to append non-characters"
 
-string :: [LispVal] -> ThrowsError LispVal
-string [] = return $ String []
-string xs = do
-  c <- sequence $ map eval xs
-  return $ foldr appendChars (String []) c
+-- string :: [LispVal] -> ThrowsError LispVal
+-- string [] = return $ String []
+-- string xs = do
+--   c <- sequence $ map (eval nullEnv) xs
+--   return $ foldr appendChars (String []) c
 
 stringLength :: [LispVal] -> ThrowsError LispVal
 stringLength [] = throwE $ NumArgs 0 []
@@ -343,15 +370,15 @@ stringCopy _ = throwE $ Default "invalid arguments to string-copy"
 stringToList :: [LispVal] -> ThrowsError LispVal
 stringToList [String xs] = return $ List $ map Character xs
 
-listToString :: [LispVal] -> ThrowsError LispVal
-listToString [List xs] =
-  let isChar (Character _) = True
-      isChar _ = False
-  in do
-    c <- sequence $ map eval xs
-    if all isChar c
-      then return $ foldr appendChars (String []) c
-      else throwE $ Default "invalid arguments to list->string"
+-- listToString :: [LispVal] -> ThrowsError LispVal
+-- listToString [List xs] =
+--   let isChar (Character _) = True
+--       isChar _ = False
+--   in do
+--     c <- sequence $ map eval xs
+--     if all isChar c
+--       then return $ foldr appendChars (String []) c
+--       else throwE $ Default "invalid arguments to list->string"
 
 
 
@@ -398,7 +425,57 @@ showError (Parser parseErr)             = "Parse error at " ++ show parseErr
 showError (Default message)             = message
 
 
+trapError :: Monad m => ExceptT LispError m String -> ExceptT e' m String
 trapError action = catchE action (return . showError)
 
 extractValue :: ThrowsError a -> a
 extractValue x = case runExcept x of (Right val) -> val
+
+
+
+-- Defining variables and passing around state:
+
+nullEnv :: IO Env
+nullEnv = newIORef []
+
+liftThrows :: ThrowsError a -> IOThrowsError a
+liftThrows x = case runExcept x of Left err -> throwE err
+                                   Right val -> return val
+
+
+runIOThrows :: IOThrowsError String -> IO String
+-- runIOThrows = undefined
+runIOThrows action = (runExceptT $ trapError action) >>= return . extractValue . except
+
+isBound :: Env -> String -> IO Bool
+isBound envRef var = readIORef envRef >>= return . maybe False (const True) . lookup var
+
+getVar :: Env -> String -> IOThrowsError LispVal
+getVar envRef var  =  do env <- liftIO $ readIORef envRef
+                         maybe (throwE $ UnboundVar "Getting an unbound variable" var)
+                               (liftIO . readIORef)
+                               (lookup var env)
+
+setVar :: Env -> String -> LispVal -> IOThrowsError LispVal
+setVar envRef var value = do env <- liftIO $ readIORef envRef
+                             maybe (throwE $ UnboundVar "Setting an unbound variable" var)
+                                   (liftIO . (flip writeIORef value))
+                                   (lookup var env)
+                             return value
+
+defineVar :: Env -> String -> LispVal -> IOThrowsError LispVal
+defineVar envRef var value = do
+     alreadyDefined <- liftIO $ isBound envRef var
+     if alreadyDefined
+        then setVar envRef var value >> return value
+        else liftIO $ do
+             valueRef <- newIORef value
+             env <- readIORef envRef
+             writeIORef envRef ((var, valueRef) : env)
+             return value
+
+bindVars :: Env -> [(String, LispVal)] -> IO Env
+bindVars envRef bindings = readIORef envRef >>= extendEnv bindings >>= newIORef
+     where extendEnv bindings env = liftM (++ env) (mapM addBinding bindings)
+           addBinding (var, value) = do ref <- newIORef value
+                                        return (var, ref)
