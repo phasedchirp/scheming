@@ -97,8 +97,6 @@ primitives = M.fromList [("+", numericBinop (+)),
               ("eq?", eqv),
               ("eqv?", eqv),
               ("equal?", equal)
-              -- ("cond", cond)
-              -- ("case",lispCase)
               ]
 
 
@@ -137,6 +135,7 @@ apply func args = maybe (throwE $ NotFunction "Unrecognized primitive function a
                         (M.lookup func primitives)
 
 eval :: Env -> LispVal -> IOThrowsError LispVal
+-- Evaluation for basic types:
 eval env val@(String _) = return val
 eval env val@(Character _) = return val
 eval env val@(Bool _) = return val
@@ -144,6 +143,7 @@ eval env val@(Number _) = return val
 eval env val@(Complex _) = return val
 eval env val@(Float _) = return val
 eval env val@(Ratio _) = return val
+-- Not-exactly-primative expressions
 eval env (Atom id) = getVar env id
 eval env (List [Atom "quote", val]) = return val
 eval env (List [Atom "if", pred, conseq, alt]) = do
@@ -153,6 +153,7 @@ eval env (List [Atom "if", pred, conseq, alt]) = do
           -- Alternative approach if you want only bools to be conditional-y, drop the otherwise clause and add these two
                 -- Bool True -> eval env conseq
                -- otherwise -> throwE $ TypeMismatch "non-bool" result
+
 eval env (List [Atom "cond"]) = throwE $ Default "insufficient cases for cond"
 eval env (List ((Atom "cond"):(List [opt]):opts)) = do
   test <- eval env opt
@@ -165,6 +166,15 @@ eval env (List ((Atom "cond"):(List [opt,expr]):opts)) = do
   case test of Bool True -> return expr'
                Bool False -> eval env (List ((Atom "cond"):opts))
                otherwise -> throwE (Default "invalid conditional form")
+
+eval env (List [Atom "case"]) = throwE $ Default "insufficient cases for cond"
+eval env (List ((Atom "case"):key:(List [datums,expr]):rest)) = do
+  key' <- eval env key
+  datums' <- eval env datums
+  expr' <- eval env expr
+  case datums' of List vals -> if key' `elem` vals then return expr' else eval env (List ((Atom "case"):key:rest))
+                  otherwise -> throwE $ Default "something went wrong"
+
 eval env (List [Atom "set!", Atom var, form]) = eval env form >>= setVar env var
 eval env (List [Atom "define", Atom var, form]) = eval env form >>= defineVar env var
 eval env (List (Atom func : args)) = mapM (eval env) args >>= liftThrows . apply func
@@ -233,16 +243,6 @@ equal args = case args of [List xs, List ys] -> if (length xs == length ys)
                             (Bool eqvEquals) <- eqv [arg1, arg2]
                             return $ Bool $ (primitiveEquals || eqvEquals)
 equal badArgList = throwE $ NumArgs 2 badArgList
-
--- lispCase :: Env -> [LispVal] -> ThrowsError LispVal
--- lispCase _ [] = throwE (Default "no key provided")
--- lispCase _ [key] = throwE (Default "no applicable cases")
--- lispCase env (key:(List [datums, expr]):rest) = do
---   val <- eval env key
---   -- return val
---   case datums of List vals -> if val `elem` vals then return expr else lispCase (key:rest)
---                  otherwise -> throwE $ Default "something went wrong"
-  -- if val `elem` vals then else return $ String "something else" --
 
 
 unaryOp :: (LispVal -> LispVal) -> [LispVal] -> ThrowsError LispVal
