@@ -81,8 +81,8 @@ primitives = M.fromList [("+", numericBinop (+)),
               ("string-ci>?", strCiBoolBinop (>)),
               ("string-ci<=?", strCiBoolBinop (<=)),
               ("string-ci>=?", strCiBoolBinop (>=)),
-              -- ("make-string", makeString),
-              -- ("string", string),
+              ("make-string", makeString),
+              ("string", string),
               ("string-length", stringLength),
               ("string-ref", stringRef),
               ("string-set!", stringSet),
@@ -90,14 +90,14 @@ primitives = M.fromList [("+", numericBinop (+)),
               ("string-append", stringAppend),
               ("string-copy", stringCopy),
               ("string->list", stringToList),
-              -- ("list->string", listToString),
+              ("list->string", listToString),
               ("car", car),
               ("cdr", cdr),
               ("cons", cons),
               ("eq?", eqv),
               ("eqv?", eqv),
               ("equal?", equal)
-              -- ("cond", cond),
+              -- ("cond", cond)
               -- ("case",lispCase)
               ]
 
@@ -126,16 +126,15 @@ showVal (Bool False) = "#f"
 showVal (List contents) = "(" ++ unwordsList contents ++ ")"
 showVal (DottedList head tail) = "(" ++ unwordsList head ++ " . " ++ showVal tail ++ ")"
 
--- instance Except LispError where
-    --  noMsg = Default "An error has occurred"
-    --  strMsg = Default
-
 
 unwordsList :: [LispVal] -> String
 unwordsList = unwords . map showVal
 
 
-
+apply :: String -> [LispVal] -> ThrowsError LispVal
+apply func args = maybe (throwE $ NotFunction "Unrecognized primitive function args" func)
+                        ($ args)
+                        (M.lookup func primitives)
 
 eval :: Env -> LispVal -> IOThrowsError LispVal
 eval env val@(String _) = return val
@@ -154,6 +153,18 @@ eval env (List [Atom "if", pred, conseq, alt]) = do
           -- Alternative approach if you want only bools to be conditional-y, drop the otherwise clause and add these two
                 -- Bool True -> eval env conseq
                -- otherwise -> throwE $ TypeMismatch "non-bool" result
+eval env (List [Atom "cond"]) = throwE $ Default "insufficient cases for cond"
+eval env (List ((Atom "cond"):(List [opt]):opts)) = do
+  test <- eval env opt
+  case test of Bool True -> return $ Bool True
+               Bool False -> eval env (List ((Atom "cond"):opts))
+               otherwise -> throwE (Default "invalid conditional form")
+eval env (List ((Atom "cond"):(List [opt,expr]):opts)) = do
+  test <- eval env opt
+  expr' <- eval env expr
+  case test of Bool True -> return expr'
+               Bool False -> eval env (List ((Atom "cond"):opts))
+               otherwise -> throwE (Default "invalid conditional form")
 eval env (List [Atom "set!", Atom var, form]) = eval env form >>= setVar env var
 eval env (List [Atom "define", Atom var, form]) = eval env form >>= defineVar env var
 eval env (List (Atom func : args)) = mapM (eval env) args >>= liftThrows . apply func
@@ -223,18 +234,6 @@ equal args = case args of [List xs, List ys] -> if (length xs == length ys)
                             return $ Bool $ (primitiveEquals || eqvEquals)
 equal badArgList = throwE $ NumArgs 2 badArgList
 
--- cond :: Env -> [LispVal] -> ThrowsError LispVal
--- cond _ [] = throwE (Default "no default case provided")
--- cond env (test:ts) = do
---     (Bool test') <- evalTest
---     expr' <- expr
---     if test'
---       then return expr'
---       else cond ts
---   where (evalTest,expr) = case test of List [t]                -> (eval env t, eval env t)
---                                        List [t,e@(List exprs)] -> (eval env t, eval env e)
-                                      --  otherwise               -> (throwE (Default "unrecognized conditional form")
-
 -- lispCase :: Env -> [LispVal] -> ThrowsError LispVal
 -- lispCase _ [] = throwE (Default "no key provided")
 -- lispCase _ [key] = throwE (Default "no applicable cases")
@@ -244,13 +243,6 @@ equal badArgList = throwE $ NumArgs 2 badArgList
 --   case datums of List vals -> if val `elem` vals then return expr else lispCase (key:rest)
 --                  otherwise -> throwE $ Default "something went wrong"
   -- if val `elem` vals then else return $ String "something else" --
-
-apply :: String -> [LispVal] -> ThrowsError LispVal
-apply func args = maybe (throwE $ NotFunction "Unrecognized primitive function args" func)
-                        ($ args)
-                        (M.lookup func primitives)
-
-
 
 
 unaryOp :: (LispVal -> LispVal) -> [LispVal] -> ThrowsError LispVal
@@ -306,29 +298,21 @@ unpackCiStr :: LispVal -> ThrowsError String
 unpackCiStr (String s) = return $ map toLower s
 unpackCiStr s = unpackStr s
 
--- makeString :: [LispVal] -> ThrowsError LispVal
--- makeString [] = throwE $ NumArgs 1 []
--- makeString [x] = do
---   val <- eval nullEnv x
---   case val of Number n -> return $ String $ replicate (fromIntegral n) ' '
---               otherwise -> throwE $ Default "make-string! takes an integer"
--- makeString [x,y] = do
---   val <- eval nullEnv x
---   c <- eval nullEnv y
---   case (val,c) of (Number n, Character x) -> return $ String $ replicate (fromIntegral n) x
---                   otherwise -> throwE $ Default "make-string! takes an integer and character"
+makeString :: [LispVal] -> ThrowsError LispVal
+makeString [] = throwE $ NumArgs 1 []
+makeString [x] = case x of Number n -> return $ String $ replicate (fromIntegral n) ' '
+                           otherwise -> throwE $ Default "make-string! takes an integer"
+makeString [x,y] = case (x,y) of (Number n, Character c) -> return $ String $ replicate (fromIntegral n) c
+                                 otherwise -> throwE $ Default "make-string! takes an integer and character"
 
 
 appendChars :: LispVal -> LispVal -> LispVal
 appendChars (Character c1) (Character c2) = String $ c1:c2:[]
 appendChars (Character c1) (String s) = String $ c1:s
--- appendChars _ _ = throwE $ Default "tried to append non-characters"
 
--- string :: [LispVal] -> ThrowsError LispVal
--- string [] = return $ String []
--- string xs = do
---   c <- sequence $ map (eval nullEnv) xs
---   return $ foldr appendChars (String []) c
+string :: [LispVal] -> ThrowsError LispVal
+string [] = return $ String []
+string xs = return $ foldr appendChars (String []) xs
 
 stringLength :: [LispVal] -> ThrowsError LispVal
 stringLength [] = throwE $ NumArgs 0 []
@@ -370,15 +354,14 @@ stringCopy _ = throwE $ Default "invalid arguments to string-copy"
 stringToList :: [LispVal] -> ThrowsError LispVal
 stringToList [String xs] = return $ List $ map Character xs
 
--- listToString :: [LispVal] -> ThrowsError LispVal
--- listToString [List xs] =
---   let isChar (Character _) = True
---       isChar _ = False
---   in do
---     c <- sequence $ map eval xs
---     if all isChar c
---       then return $ foldr appendChars (String []) c
---       else throwE $ Default "invalid arguments to list->string"
+listToString :: [LispVal] -> ThrowsError LispVal
+listToString [List xs] =
+  let isChar (Character _) = True
+      isChar _ = False
+  in
+    if all isChar xs
+      then return $ foldr appendChars (String []) xs
+      else throwE $ Default "invalid arguments to list->string"
 
 
 
