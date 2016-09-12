@@ -7,6 +7,7 @@ module ParseExpr
 
 
 -- import LispTypes
+import LispTypes (LispVal(..))
 import Data.Complex (Complex(..))
 import Data.Ratio
 import qualified Data.Vector as V (Vector,fromList,(//),(!))
@@ -17,19 +18,6 @@ import Text.Megaparsec (oneOf,skipSome,some,letterChar,spaceChar,char,digitChar,
 import Text.Megaparsec.String (Parser(..))
 import Text.Megaparsec.Combinator (sepBy,endBy)
 import Control.Monad (liftM)
-
-data LispVal = Atom String
-             | List [LispVal]
-             | DottedList [LispVal] LispVal
-             | Vector (V.Vector LispVal)
-             | Number Integer
-             | Float Double
-             | Ratio Rational
-             | Complex (Complex Double) -- should be more general!
-             | Character Char
-             | String String
-             | Bool Bool
-             deriving (Eq)
 
 --  Parsers:
 
@@ -99,10 +87,7 @@ readBin' = fst . head . readBin
 parseBin :: Parser LispVal
 parseBin = some digitChar >>= \x -> return $ (Number . readBin') x
 
--- parseBin = char '#' >> char 'b' >> parseBin'
--- parseHex = char '#' >> char 'x' >> parseHex'
 
--- has issues when used in conjuction
 parseBase :: Parser LispVal
 parseBase = do
   radix <- char '#' >> letterChar
@@ -196,9 +181,3 @@ parseExpr = parseAtom
 
 parseExpr' :: Parser LispVal
 parseExpr' = spaces >> parseExpr
-
--- Read input:
--- readExpr :: String -> LispVal
--- readExpr input = case parse parseExpr "lisp" input of
---   Left err -> String $ "No match" ++ show err
---   Right val -> val

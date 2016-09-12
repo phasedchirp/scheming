@@ -13,11 +13,9 @@ module StringOps
     , makeString
     ) where
 
-module StringOps where
-
-import LispTypes (LispVal(..),ThrowsError(..))
+import LispTypes (LispVal(..),ThrowsError(..),LispError(..))
 import Control.Monad.Trans.Except (throwE,catchE,Except(..),runExcept,ExceptT(..),runExceptT,except)
-import Lib
+import Data.Char (toLower)
 
 -- Functions for operating on strings
 

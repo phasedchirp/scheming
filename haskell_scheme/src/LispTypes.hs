@@ -2,9 +2,15 @@
 {-# LANGUAGE ExistentialQuantification #-}
 module LispTypes where
 
-import Control.Monad.Trans.Except (Except(..),ExceptT(..))
+import Control.Monad.Trans.Except (Except(..),except,runExcept,throwE,catchE,ExceptT(..),runExceptT)
 import Data.Map (Map(..))
 import Data.IORef
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad (liftM)
+import Data.Complex (Complex(..))
+import Data.Ratio
+import qualified Data.Vector as V (Vector)
+import Text.Megaparsec (ParseError)
 
 
 data LispVal = Atom String
@@ -34,6 +40,8 @@ showVal (Bool False) = "#f"
 showVal (List contents) = "(" ++ unwordsList contents ++ ")"
 showVal (DottedList head tail) = "(" ++ unwordsList head ++ " . " ++ showVal tail ++ ")"
 
+unwordsList :: [LispVal] -> String
+unwordsList = unwords . map showVal
 
 -- Error Handling:
 data LispError = NumArgs Integer [LispVal]
@@ -67,8 +75,8 @@ extractValue x = case runExcept x of (Right val) -> val
 trapError :: Monad m => ExceptT LispError m String -> ExceptT e' m String
 trapError action = catchE action (return . showError)
 
-extractValue :: ThrowsError a -> a
-extractValue x = case runExcept x of (Right val) -> val
+-- extractValue :: ThrowsError a -> a
+-- extractValue x = case runExcept x of (Right val) -> val
 
 
 
