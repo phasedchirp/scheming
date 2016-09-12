@@ -12,11 +12,13 @@ module Lib
     , runIOThrows
     , liftThrows
     , nullEnv
+    , primitiveBindings
     ) where
 
 import LispTypes -- Data types and closely associated functions
 import StringOps -- functions for operating on strings
 import ParseExpr -- input parsing
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad (liftM)
 import Control.Monad.Trans.Except (throwE,catchE,Except(..),runExcept,ExceptT(..),runExceptT,except)
 import Text.Megaparsec (ParseError,parse)
@@ -25,8 +27,8 @@ import Data.IORef
 
 
 -- Lookup table of primitive functions:
-primitives :: M.Map String ([LispVal] -> ThrowsError LispVal)
-primitives = M.fromList [("+", numericBinop (+)),
+primitives :: [(String,[LispVal] -> ThrowsError LispVal)]
+primitives = [("+", numericBinop (+)),
               ("-", numericBinop (-)),
               ("*", numericBinop (*)),
               ("/", numericBinop div),
@@ -76,17 +78,35 @@ primitives = M.fromList [("+", numericBinop (+)),
               ]
 
 
+primitiveBindings :: IO Env
+primitiveBindings = nullEnv >>= (flip bindVars $ map makePrimitiveFunc primitives)
+  where makePrimitiveFunc (var,func) = (var, PrimitiveFunc func)
+
+
 readExpr :: String -> ThrowsError LispVal
 readExpr input = case parse parseExpr "lisp" input of
      Left err -> throwE $ Parser err
      Right val -> return val
 
 
+makeFunc varargs env params body = return $ Func (map showVal params) varargs body env
+makeNormalFunc = makeFunc Nothing
+makeVarargs = makeFunc . Just . showVal
 
-apply :: String -> [LispVal] -> ThrowsError LispVal
-apply func args = maybe (throwE $ NotFunction "Unrecognized primitive function args" func)
-                        ($ args)
-                        (M.lookup func primitives)
+apply :: LispVal -> [LispVal] -> IOThrowsError LispVal
+apply (PrimitiveFunc func) args = liftThrows $ func args
+-- apply func args = maybe (throwE $ NotFunction "Unrecognized primitive function args" func)
+--                         ($ args)
+--                         (M.lookup func primitives)
+apply (Func params varargs body closure) args  | nPars /= nArgs && varargs == Nothing = throwE  $ NumArgs (fromIntegral nPars) args
+                                               | otherwise = (liftIO $ bindVars closure $ zip params args) >>= bindVarArgs varargs >>= evalBody
+                                                  where nPars = length params
+                                                        nArgs = length args
+                                                        remainingArgs = drop nPars args
+                                                        evalBody env = liftM last $ mapM (eval env) body
+                                                        bindVarArgs arg env  = case arg of Just argName -> liftIO $ bindVars env [(argName, List remainingArgs)]
+                                                                                           Nothing -> return env
+
 
 eval :: Env -> LispVal -> IOThrowsError LispVal
 -- Evaluation for basic types:
@@ -131,7 +151,15 @@ eval env (List ((Atom "case"):key:(List [datums,expr]):rest)) = do
 
 eval env (List [Atom "set!", Atom var, form]) = eval env form >>= setVar env var
 eval env (List [Atom "define", Atom var, form]) = eval env form >>= defineVar env var
-eval env (List (Atom func : args)) = mapM (eval env) args >>= liftThrows . apply func
+
+eval env (List (Atom "define" : List (Atom var : params):body)) = makeNormalFunc env params body >>= defineVar env var
+eval env (List (Atom "define" : DottedList (Atom var:params) varargs : body)) = makeVarargs varargs env params body >>= defineVar env var
+eval env (List (Atom "lambda" :varargs@(Atom _):body)) = makeVarargs varargs env [] body
+
+eval env (List (func : args)) = do
+  func' <- eval env func
+  argVals <- mapM (eval env) args
+  apply func' argVals
 eval env val@(List _) = return val
 eval env badForm = throwE $ BadSpecialForm "Unrecognized special form" badForm
 

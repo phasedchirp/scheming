@@ -38,7 +38,7 @@ repl lispEnv = forever $ do
 main :: IO ()
 main = do
   args <- getArgs
-  lispEnv <- nullEnv
+  lispEnv <- primitiveBindings
   case length args of 0 -> do
                             hSetBuffering stdout NoBuffering
                             repl lispEnv

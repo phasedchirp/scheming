@@ -24,7 +24,27 @@ data LispVal = Atom String
              | Character Char
              | String String
              | Bool Bool
-             deriving (Eq)
+             | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
+             | Func { params :: [String], vararg :: (Maybe String), body :: [LispVal], closure :: Env}
+            --  deriving (Eq)
+-- Having functions as part of LispVal rules out deriving
+-- Must be a better way to handle this?
+instance Eq LispVal where
+  PrimitiveFunc _ == PrimitiveFunc _ = False
+  Func _ _ _ _ == Func _ _ _ _ = False
+  Atom x == Atom y = x == y
+  List a == List b = a == b
+  DottedList xs y == DottedList as b = (xs == as) && (y == b)
+  Vector vs == Vector vs' = vs == vs'
+  Number a == Number b = a == b
+  Float a == Float b = a == b
+  Ratio a == Ratio b = a == b
+  Complex a == Complex b = a == b
+  String a == String b = a == b
+  Bool a == Bool b = a == b
+  _ == _ = False
+
+
 
 -- Printing
 showVal :: LispVal -> String
@@ -39,6 +59,10 @@ showVal (Bool True) = "#t"
 showVal (Bool False) = "#f"
 showVal (List contents) = "(" ++ unwordsList contents ++ ")"
 showVal (DottedList head tail) = "(" ++ unwordsList head ++ " . " ++ showVal tail ++ ")"
+showVal (PrimitiveFunc _) = "<primitive>"
+showVal (Func pars varargs body closure) = "(lambda (" ++ unwords (map show pars) ++ arg ++ ")...)"
+  where arg = case varargs of Nothing -> []
+                              Just val -> " . " ++ val
 
 unwordsList :: [LispVal] -> String
 unwordsList = unwords . map showVal
