@@ -11,6 +11,7 @@ import Data.Complex (Complex(..))
 import Data.Ratio
 import qualified Data.Vector as V (Vector)
 import Text.Megaparsec (ParseError)
+import System.IO (Handle)
 
 
 data LispVal = Atom String
@@ -26,12 +27,12 @@ data LispVal = Atom String
              | Bool Bool
              | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
              | Func { params :: [String], vararg :: (Maybe String), body :: [LispVal], closure :: Env}
+             | IOFunc ([LispVal] -> IOThrowsError LispVal)
+             | Port Handle
             --  deriving (Eq)
--- Having functions as part of LispVal rules out deriving
--- Must be a better way to handle this?
+-- Having functions as part of LispVal rules out deriving automatically
+-- Better way to handle this?
 instance Eq LispVal where
-  PrimitiveFunc _ == PrimitiveFunc _ = False
-  Func _ _ _ _ == Func _ _ _ _ = False
   Atom x == Atom y = x == y
   List a == List b = a == b
   DottedList xs y == DottedList as b = (xs == as) && (y == b)
@@ -43,7 +44,6 @@ instance Eq LispVal where
   String a == String b = a == b
   Bool a == Bool b = a == b
   _ == _ = False
-
 
 
 -- Printing
@@ -63,6 +63,8 @@ showVal (PrimitiveFunc _) = "<primitive>"
 showVal (Func pars varargs body closure) = "(lambda (" ++ unwords (map show pars) ++ arg ++ ")...)"
   where arg = case varargs of Nothing -> []
                               Just val -> " . " ++ val
+showVal (Port _)   = "<IO port>"
+showVal (IOFunc _) = "<IO primitive>"
 
 unwordsList :: [LispVal] -> String
 unwordsList = unwords . map showVal
@@ -92,16 +94,11 @@ data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
 -- Error handling using ExceptT
 type ThrowsError = Except LispError
 
-
 extractValue :: ThrowsError a -> a
 extractValue x = case runExcept x of (Right val) -> val
 
 trapError :: Monad m => ExceptT LispError m String -> ExceptT e' m String
 trapError action = catchE action (return . showError)
-
--- extractValue :: ThrowsError a -> a
--- extractValue x = case runExcept x of (Right val) -> val
-
 
 
 -- Defining variables and passing around state:

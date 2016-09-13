@@ -1,12 +1,11 @@
 module ParseExpr
     (parseExpr,
      parseExpr',
-     LispVal(..)
+     LispVal(..),
+     spaces
     ) where
 
 
-
--- import LispTypes
 import LispTypes (LispVal(..))
 import Data.Complex (Complex(..))
 import Data.Ratio
