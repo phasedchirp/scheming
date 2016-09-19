@@ -17,6 +17,8 @@ module Lib
     ) where
 
 import LispTypes -- Data types and closely associated functions
+import Data.Complex (Complex(..))
+import Data.Ratio
 import StringOps -- functions for operating on strings
 import ParseExpr -- input parsing
 import Control.Monad.IO.Class (liftIO)
@@ -32,13 +34,13 @@ import System.IO
 
 -- Lookup table of primitive functions:
 primitives :: [(String,[LispVal] -> ThrowsError LispVal)]
-primitives = [("+", numericBinop (+)),
-              ("-", numericBinop (-)),
-              ("*", numericBinop (*)),
-              ("/", numericBinop div),
-              ("mod", numericBinop mod),
-              ("quotient", numericBinop quot),
-              ("remainder", numericBinop rem),
+primitives = [("+", numericBinop "+"),
+              ("-", numericBinop "-"),
+              ("*", numericBinop "*"),
+              ("/", numericBinop "/"),
+              ("mod", numericBinop "mod"),
+              ("quotient", numericBinop "quot"),
+              ("remainder", numericBinop "rem"),
               ("boolean?", unaryOp isBool),
               ("symbol?", unaryOp isSymbol),
               ("string?", unaryOp isString),
@@ -108,11 +110,6 @@ readOrThrow parser input = case parse parser "lisp" input of
 
 readExpr = readOrThrow parseExpr
 readExprList = readOrThrow (endBy parseExpr spaces)
-
--- readExpr :: String -> ThrowsError LispVal
--- readExpr input = case parse parseExpr "lisp" input of
---      Left err -> throwE $ Parser err
---      Right val -> return val
 
 
 makeFunc varargs env params body = return $ Func (map showVal params) varargs body env
@@ -262,11 +259,31 @@ unaryOp f [v] = return $ f v
 -- unaryOp f [] = throwE $ NumArgs 1 []
 unaryOp f _ = throwE $ NumArgs 1 []
 
-numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
-numericBinop op           []  = throwE $ NumArgs 2 []
-numericBinop op singleVal@[_] = throwE $ NumArgs 2 singleVal
-numericBinop op params        = mapM unpackNum params >>= return . Number . foldl1 op
 
+runIntOp op pars = case lookup op intOps of Just f -> integerBinop f pars
+                                            otherwise -> throwE $ Default "unrecognized primitive function for ints"
+
+runFloOp op pars = case lookup op floatOps of Just f -> floatBinop f pars
+                                              otherwise -> throwE $ Default "unrecognized primitive function for floats"
+
+runRatOp op pars = case lookup op ratioOps of Just f -> rationalBinop f pars
+                                              otherwise -> throwE $ Default "unrecognized primitive function for ratios"
+
+runComOp op pars = case lookup op complexOps of Just f -> complexBinop f pars
+                                                otherwise -> throwE $ Default "unrecognized primitive function for complex numbers"
+
+numericBinop _ []    = throwE $ NumArgs 2 []
+numericBinop _ [x]   = throwE $ NumArgs 2 [x]
+numericBinop op pars = case pars of ((Number _):ps)  -> runIntOp op pars
+                                    ((Float _):ps)   -> runFloOp op pars
+                                    ((Ratio _):ps)   -> runRatOp op pars
+                                    ((Complex _):ps) -> runComOp op pars
+
+-- Handling Integers
+intOps = [("+",(+)),("-",(-)),("*",(*)),("/",div),("mod",mod),("quot",quot),("rem",rem)]
+
+integerBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
+integerBinop op params        = mapM unpackNum params >>= return . Number . foldl1 op
 
 unpackNum :: LispVal -> ThrowsError Integer
 unpackNum (Number n) = return n
@@ -277,15 +294,49 @@ unpackNum (String n) = let parsed = reads n in
 unpackNum (List [n]) = unpackNum n
 unpackNum notNum     = throwE $ TypeMismatch "number" notNum
 
+-- handling floats
+floatOps = [("+",(+)),("-",(-)),("*",(*)),("/",(/))]
 
-floatBinop :: (Double -> Double -> Double) -> [LispVal] -> LispVal
-floatBinop op params = Float $ foldl1 op $ map unpackFloat params
+unpackFloat :: LispVal -> ThrowsError Double
+unpackFloat (Float n) = return n
+unpackFloat (String n) = let parsed = reads n in
+                         if null parsed
+                             then throwE $ TypeMismatch "number" $ String n
+                             else return $ fst $ parsed !! 0
+unpackFloat (List [n]) = unpackFloat n
+unpackFloat notNum     = throwE $ TypeMismatch "number" notNum
 
-unpackFloat :: LispVal -> Double
-unpackFloat (Float n) = n
-unpackFloat _ = 0.0
+floatBinop :: (Double -> Double -> Double) -> [LispVal] -> ThrowsError LispVal
+floatBinop op params        = mapM unpackFloat params >>= return . Float . foldl1 op
 
+-- handling rational
+ratioOps = [("+",(+)),("-",(-)),("*",(*)),("/",(/))]
 
+unpackRational :: LispVal -> ThrowsError Rational
+unpackRational (Ratio n) = return n
+unpackRational (String n) = let parsed = reads n in
+                            if null parsed
+                              then throwE $ TypeMismatch "number" $ String n
+                              else return $ fst $ parsed !! 0
+unpackRational (List [n]) = unpackRational n
+unpackRational notNum     = throwE $ TypeMismatch "number" notNum
+
+rationalBinop :: (Rational -> Rational -> Rational) -> [LispVal] -> ThrowsError LispVal
+rationalBinop op params        = mapM unpackRational params >>= return . Ratio . foldl1 op
+--
+-- handling Complex
+complexOps = [("+",(+)),("-",(-)),("*",(*)),("/",(/))]
+unpackComplex :: LispVal -> ThrowsError (Complex Double)
+unpackComplex (Complex n) = return n
+unpackComplex (String n) = let parsed = reads n in
+                            if null parsed
+                              then throwE $ TypeMismatch "number" $ String n
+                              else return $ fst $ parsed !! 0
+unpackComplex (List [n]) = unpackComplex n
+unpackComplex notNum     = throwE $ TypeMismatch "number" notNum
+--
+complexBinop :: (Complex Double -> Complex Double -> Complex Double) -> [LispVal] -> ThrowsError LispVal
+complexBinop op params        = mapM unpackComplex params >>= return . Complex . foldl1 op
 
 boolBinop :: (LispVal -> ThrowsError a) -> (a -> a -> Bool) -> [LispVal] -> ThrowsError LispVal
 boolBinop unpacker op args = if length args /= 2
@@ -294,6 +345,11 @@ boolBinop unpacker op args = if length args /= 2
                                      right <- unpacker $ args !! 1
                                      return $ Bool $ left `op` right
 
+
+intBoolBinop = boolBinop unpackNum
+floatBoolBinOp = boolBinop unpackFloat
+ratioBoolBinOp = boolBinop unpackRational
+-- complexBoolBinop = boolBinop unpackComplex
 
 numBoolBinop  = boolBinop unpackNum
 strBoolBinop  = boolBinop unpackStr
