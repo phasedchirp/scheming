@@ -1,52 +1,58 @@
 use std::io::{stdout, stdin, Write};
+use std::collections::HashSet;
 
-// #[derive(Debug, PartialEq)]
-// enum LispVal {
-//     Atom(String)
-// }
+fn is_op(c: &char, tbl: &HashSet<char>) -> bool {
+    tbl.contains(c)
+}
 
 #[derive(Debug, PartialEq)]
-struct Stack {
-    stack: Vec<char>,
-    valid: bool
+enum LispVal {
+    Atom(String)
 }
 
-impl Stack {
-    fn new() -> Stack {
-        Stack{stack: Vec::new(), valid: true}
+use::LispVal::*;
+
+#[derive(Debug, PartialEq)]
+struct Tokens {
+    vals: Vec<LispVal>
+}
+
+impl Tokens {
+    fn new() -> Tokens {
+        Tokens{vals: Vec::new()}
     }
 
-    fn push(&mut self, val: char) {
-        self.stack.push(val);
+    fn push(&mut self, val: LispVal) {
+        self.vals.push(val);
     }
 
-    fn pop(&mut self) -> Option<char> {
-        self.stack.pop()
+    fn pop(&mut self) -> Option<LispVal> {
+        self.vals.pop()
     }
 }
 
-fn parse_input(s: &str) {
-    let mut stack = Stack::new();
+fn tokenize(s: &str) -> Tokens {
+    let mut tokens = Tokens::new();
     let mut input = s.chars().peekable();
     loop {
         match input.peek() {
-            Some(&'(') => stack.push(input.next().unwrap()),
-            Some(&')') => {
-                if let None = stack.pop() {
-                    stack.valid = false;
-                    break;
-                }
-                input.next().unwrap();
+            Some(&'(') => tokens.push(
+                Atom(input.next().unwrap().to_string())
+            ),
+            Some(&')') =>  tokens.push(
+                Atom(input.next().unwrap().to_string())
+            ),
+            Some(_)    => {
+                let mut token = String::new();
+                while input.peek() != Some(&')')
+                   && input.peek() != Some(&'(') {
+                       token.push(input.next().unwrap());
+                   }
+                tokens.push(Atom(token));
             },
-            _         => break
+            None => return tokens
 
         }
-
-    }
-    if stack.valid {
-        println!("Balanced");
-    } else {
-        println!("Unbalanced");
     }
 }
 
@@ -57,12 +63,13 @@ fn repl() {
         stdout().flush().expect("Something went wrong?");
         stdin().read_line(&mut user_input)
                    .expect("Failed to read input");
-        parse_input(&user_input.trim())
+        let mut tokens = tokenize(&user_input.trim());
     }
 
 }
 
 fn main() {
-
-    repl();
-}
+    let test = tokenize("(stuff(nested(inside(of(stuff)))))");
+    println!("{:?}",test);
+    // repl();
+ }
