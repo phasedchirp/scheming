@@ -1,6 +1,11 @@
 use std::io::{stdout, stdin, Write};
-// use std::io::Write;
 
+// #[derive(Debug, PartialEq)]
+// enum LispVal {
+//     Atom(String)
+// }
+
+#[derive(Debug, PartialEq)]
 struct Stack {
     stack: Vec<char>,
     valid: bool
@@ -22,18 +27,21 @@ impl Stack {
 
 fn parse_input(s: &str) {
     let mut stack = Stack::new();
-    for c in s.chars() {
-        if c == '(' {
-            stack.push('(')
-        } else if c == ')' {
-            if let None = stack.pop() {
-                stack.valid = false;
-                break;
-            }
-        } else {
-            println!("Invalid input");
-            break;
+    let mut input = s.chars().peekable();
+    loop {
+        match input.peek() {
+            Some(&'(') => stack.push(input.next().unwrap()),
+            Some(&')') => {
+                if let None = stack.pop() {
+                    stack.valid = false;
+                    break;
+                }
+                input.next().unwrap();
+            },
+            _         => break
+
         }
+
     }
     if stack.valid {
         println!("Balanced");
@@ -55,5 +63,6 @@ fn repl() {
 }
 
 fn main() {
+
     repl();
 }
